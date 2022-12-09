@@ -16,11 +16,12 @@ from imblearn.over_sampling import RandomOverSampler
 from sklearn.preprocessing import normalize
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV,RandomizedSearchCV
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import recall_score, f1_score
 import xgboost
 from xgboost import XGBClassifier
+from sklearn.model_selection import StratifiedKFold
 import os
 
 
@@ -225,16 +226,16 @@ recall = recall_score(ytest, ypredrf, average='weighted')
 f1 = f1_score(ytest, ypredrf, average='weighted')
 
 #XGBOOST
-modelxgb = XGBClassifier(loss="deviance",learning_rate=0.3,max_depth=3,
-                         max_features="sqrt",subsample=0.95,n_estimators=50)
-modelxgb.fit(X6_train,Y6_train)
-Y6_pred2 = modelxgb.predict(X6_test)
-test_acc2 = accuracy_score(Y6_test, Y6_pred2)
+#modelxgb = XGBClassifier(objective='multi:softprob',learning_rate=0.3,max_depth=3,
+                         #max_features="sqrt",subsample=0.95,n_estimators=50)
+#modelxgb.fit(X6_train,Y6_train)
+#Y6_pred2 = modelxgb.predict(X6_test)
+#test_acc2 = accuracy_score(Y6_test, Y6_pred2)
 
 #AFTER REBALANCE
+xtrain_reb, xtest_reb, ytrain_reb, ytest_reb = train_test_split(Xsmoted,Ysmoted)
 
 #RANDOM FOREST
-xtrain_reb, xtest_reb, ytrain_reb, ytest_reb = train_test_split(Xsmoted,Ysmoted)
 model_rf_prime = RandomForestClassifier(n_estimators=50, 
                                   max_depth=5)
 model_rf_prime.fit(xtrain_reb, ytrain_reb)
@@ -244,9 +245,72 @@ test_acc_reb = accuracy_score(ytest_reb, ypredrf_reb)
 cmrf_reb = confusion_matrix(ytest_reb, ypredrf_reb,labels=model_rf_prime.classes_)
 disprf_reb = ConfusionMatrixDisplay(cmrf_reb,display_labels=model_rf_prime.classes_)
 disprf_reb.plot()
+plt.title('Confusion matrix with Random Forests')
 plt.show()
 
-recall = recall_score(ytest, ypredrf, average='weighted')
-f1 = f1_score(ytest, ypredrf, average='weighted')
+recall_reb = recall_score(ytest_reb, ypredrf_reb,average ='macro')
+f1_reb = f1_score(ytest_reb, ypredrf_reb,average = 'macro')
 
+#premier esssai RF rebalanced voir cmrf_reb, 58% de précision sur 3 classes égalitaires.
 
+#XGBOOST
+modelxgb_reb = XGBClassifier(objective='multi:softprob',learning_rate=0.3,max_depth=3,subsample=0.95,n_estimators=30)
+modelxgb_reb.fit(xtrain_reb,ytrain_reb)
+
+ypredxgb_reb = modelxgb_reb.predict(xtest_reb)
+test_acc_reb_xgb = accuracy_score(ytest_reb, ypredxgb_reb)
+#63% de précision 
+cmxgb_reb = confusion_matrix(ytest_reb, ypredxgb_reb,labels=modelxgb_reb.classes_)
+dispxgb_reb = ConfusionMatrixDisplay(cmxgb_reb,display_labels=modelxgb_reb.classes_)
+dispxgb_reb.plot()
+plt.title('Confusion matrix with XGBOOST')
+plt.show()
+
+recall_xgbreb = recall_score(ytest_reb, ypredxgb_reb,average ='macro')
+f1_xgbreb = f1_score(ytest_reb, ypredxgb_reb,average = 'macro')
+
+#GRID SEARCH XGBOOST
+#dico des paramètres qu'on veut tester
+params = {
+        'min_child_weight': [1, 5, 10],
+        'gamma': [0.5, 1, 1.5, 2, 5],
+        'subsample': [0.6, 0.8, 1.0],
+        'max_depth': [3, 4, 5],
+        'learning_rate' : [0.1,0.3,0.5,0.7],
+        'n_estimators': [25,50,75,100,200]
+        }
+
+xgb = XGBClassifier( objective='multi:softprob',silent=True, nthread=1)
+#5-cross val avec 10 essais de random_search
+folds = 5
+param_comb = 10
+
+skf = StratifiedKFold(n_splits=folds, shuffle = True, random_state =42)
+
+random_search = RandomizedSearchCV(xgb, param_distributions=params, 
+                                   n_iter=param_comb,scoring='accuracy', n_jobs=-1,
+                                   cv=skf.split(xtrain_reb,ytrain_reb), verbose=3, random_state=42)
+
+random_search.fit(xtrain_reb,ytrain_reb)
+
+print(random_search.cv_results_)
+print(random_search.best_estimator_)
+print(random_search.best_params_)
+
+#{'subsample': 0.6, 'n_estimators': 200, 'min_child_weight': 10, 'max_depth': 5, 'learning_rate': 0.5, 'gamma': 1.5}
+#CV1 : 0.682, CV2 :0.680, CV3 : 0.679, CV4 : 0.680, CV5 : 0.676
+
+xgb_best = XGBClassifier(objective='multi:softprob',learning_rate=0.5,
+                         max_depth=5,subsample=0.6,n_estimators=200,
+                         min_child_weight = 10, gamma = "1.5")
+xgb_best.fit(xtrain_reb,ytrain_reb)
+
+ypredxgb_best = xgb_best.predict(xtest_reb)
+test_acc_reb_xgb_best = accuracy_score(ytest_reb, ypredxgb_best)
+accu_xgb_best = round(test_acc_reb_xgb_best,3)*100
+
+cmxgb_best = confusion_matrix(ytest_reb, ypredxgb_best,labels=xgb_best.classes_)
+dispxgb_best = ConfusionMatrixDisplay(cmxgb_best,display_labels=xgb_best.classes_)
+dispxgb_best.plot()
+plt.title('Confusion matrix with XGBOOST after randomized search tuning : accuracy ='+str(accu_xgb_best)+'%')
+plt.show()
