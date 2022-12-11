@@ -27,10 +27,11 @@ import os
 
 os.chdir('/Users/paul-antoine/Desktop/projet-python-2A/accident-route')
 
-lieux = pd.read_csv('lieux-2021.csv',sep= ";")
-usagers = pd.read_csv('usagers-2021.csv',sep= ";")
-vehicules = pd.read_csv('vehicules-2021.csv', sep= ";")
-caracteristiques = pd.read_csv("carcteristiques-2021.csv",sep = ";")
+
+lieux = pd.read_csv('https://www.data.gouv.fr/fr/datasets/r/8a4935aa-38cd-43af-bf10-0209d6d17434',sep= ";")
+usagers = pd.read_csv('https://www.data.gouv.fr/fr/datasets/r/ba5a1956-7e82-41b7-a602-89d7dd484d7a',sep = ';')
+vehicules = pd.read_csv('https://www.data.gouv.fr/fr/datasets/r/0bb5953a-25d8-46f8-8c25-b5c2f5ba905e', sep= ";")
+caracteristiques = pd.read_csv('https://www.data.gouv.fr/fr/datasets/r/85cfdc0c-23e4-4674-9bcd-79a970d7269b',sep = ";")
 
 
 lieux.isnull().sum()
@@ -98,8 +99,9 @@ plt.ylabel('nombres')
 plt.title('distribution gravité accidents')
 
 labels, counts = np.unique(test4['grav'], return_counts=True)
-plt.bar(labels, counts, align='center')
+plt.bar(labels, counts)
 plt.gca().set_xticks(labels)
+plt.title('distribution des classes de gravité')
 plt.show()
 
 #déséquilibré : à prendre en compte dans l'algo dans le training set 
@@ -136,6 +138,9 @@ Y8 = Y7.apply(lambda x: 2 if x == 3 else x)
 labels2, counts2 = np.unique(Y8, return_counts=True)
 plt.bar(labels2, counts2/len(Y8)*100, align='center')
 plt.gca().set_xticks(labels2)
+plt.title('données non rééquilibrées après regroupement tué & bléssé hospitalisé')
+plt.xlabel('gravité')
+plt.ylabel('pourcentage des classes')
 plt.show()
 
 #XGBOOST = chiant pour les hyperparamètres
@@ -200,17 +205,27 @@ X_train6 = normalize(X6.values)
 #REBALANCE
 sm = SMOTE()
 Xsmoted, Ysmoted = sm.fit_resample(X_train6, Y8)
-np.unique(Ysmoted, return_counts = True)
 
-labelssm, countsm = np.unique(Ysmoted, return_counts=True)
-plt.bar(labelssm, countsm/len(Ysmoted)*100, align='center')
+#REBALANCE WITH SMOTENC : DEAL WITH CATEGORICAL VARIABLES DIRECTLY
+var_categoriques = [0,1,2,3,5,6,7,8,9,10]
+smNC = SMOTENC(categorical_features=var_categoriques)
+XsmotedNC, YsmotedNC = smNC.fit_resample(test6.iloc[:,:-1], Y8)
+
+XsmotedNC_encoded = pd.get_dummies(XsmotedNC[features].astype(str))
+np.unique(YsmotedNC, return_counts = True)
+
+labelssm, countsm = np.unique(YsmotedNC, return_counts=True)
+plt.bar(labelssm, countsm/len(YsmotedNC)*100, align='center')
 plt.gca().set_xticks(labelssm)
+plt.xlabel('gravité')
+plt.ylabel('pourcentage des classes')
+plt.title('données rééquilibrées entre classes ')
 plt.show()
 
-#BEFORE REBALANCE
+#REBALANCE SMOTENC
 
 #RANDOM FOREST
-xtrain, xtest, ytrain, ytest = train_test_split(X_train6,Y8)
+xtrain, xtest, ytrain, ytest = train_test_split(XsmotedNC,YsmotedNC)
 model_rf = RandomForestClassifier(n_estimators=100, 
                                   max_depth=8)
 model_rf.fit(xtrain, ytrain)
@@ -242,10 +257,11 @@ model_rf_prime.fit(xtrain_reb, ytrain_reb)
 ypredrf_reb = model_rf_prime.predict(xtest_reb)
 test_acc_reb = accuracy_score(ytest_reb, ypredrf_reb)
 
+accu_rf = round(test_acc_reb*100,1) 
 cmrf_reb = confusion_matrix(ytest_reb, ypredrf_reb,labels=model_rf_prime.classes_)
 disprf_reb = ConfusionMatrixDisplay(cmrf_reb,display_labels=model_rf_prime.classes_)
 disprf_reb.plot()
-plt.title('Confusion matrix with Random Forests')
+plt.title('Confusion matrix with Random Forests accuracy = '+str(accu_rf)+'%')
 plt.show()
 
 recall_reb = recall_score(ytest_reb, ypredrf_reb,average ='macro')
@@ -259,11 +275,12 @@ modelxgb_reb.fit(xtrain_reb,ytrain_reb)
 
 ypredxgb_reb = modelxgb_reb.predict(xtest_reb)
 test_acc_reb_xgb = accuracy_score(ytest_reb, ypredxgb_reb)
+accu_xgb = round(test_acc_reb_xgb*100,1)
 #63% de précision 
 cmxgb_reb = confusion_matrix(ytest_reb, ypredxgb_reb,labels=modelxgb_reb.classes_)
 dispxgb_reb = ConfusionMatrixDisplay(cmxgb_reb,display_labels=modelxgb_reb.classes_)
 dispxgb_reb.plot()
-plt.title('Confusion matrix with XGBOOST')
+plt.title('Confusion matrix with XGBOOST accuracy = '+str(accu_xgb)+'%')
 plt.show()
 
 recall_xgbreb = recall_score(ytest_reb, ypredxgb_reb,average ='macro')
@@ -282,10 +299,10 @@ params = {
 
 xgb = XGBClassifier( objective='multi:softprob',silent=True, nthread=1)
 #5-cross val avec 10 essais de random_search
-folds = 5
+folds = 3
 param_comb = 10
 
-skf = StratifiedKFold(n_splits=folds, shuffle = True, random_state =42)
+skf = StratifiedKFold(n_splits=folds, shuffle = True, random_state =42,)
 
 random_search = RandomizedSearchCV(xgb, param_distributions=params, 
                                    n_iter=param_comb,scoring='accuracy', n_jobs=-1,
@@ -302,7 +319,7 @@ print(random_search.best_params_)
 
 xgb_best = XGBClassifier(objective='multi:softprob',learning_rate=0.5,
                          max_depth=5,subsample=0.6,n_estimators=200,
-                         min_child_weight = 10, gamma = "1.5")
+                         min_child_weight = 10, gamma = 1.5)
 xgb_best.fit(xtrain_reb,ytrain_reb)
 
 ypredxgb_best = xgb_best.predict(xtest_reb)
@@ -312,5 +329,85 @@ accu_xgb_best = round(test_acc_reb_xgb_best,3)*100
 cmxgb_best = confusion_matrix(ytest_reb, ypredxgb_best,labels=xgb_best.classes_)
 dispxgb_best = ConfusionMatrixDisplay(cmxgb_best,display_labels=xgb_best.classes_)
 dispxgb_best.plot()
-plt.title('Confusion matrix with XGBOOST after randomized search tuning : accuracy ='+str(accu_xgb_best)+'%')
+plt.title('Confusion matrix with tuned XGBOOST after random search  : accuracy = '+str(accu_xgb_best)+'%')
 plt.show()
+
+#tester une grid search plus précise ?
+
+#SVM 
+#rbf = svm.SVC(kernel='rbf', gamma=1, C=100).fit(xtrain_reb, ytrain_reb)
+#poly = svm.SVC(kernel='poly', degree=3, C=1).fit(X_train, y_train)
+
+#rbf_pred = rbf.predict(x_test_reb)
+#rbf_accuracy = accuracy_score(y_test_reb, rbf_pred)
+
+#Explicabilité du modèle
+#sur quoi se base l'algorithme pour prédire ?, les facteurs importants qui influent sur la gravité d'un accident
+
+#feature_importance, SHAP
+
+
+
+#REBALANCE SMOTENC
+
+#RANDOM FOREST
+xtrain, xtest, ytrain, ytest = train_test_split(XsmotedNC,YsmotedNC)
+model_rf = RandomForestClassifier(n_estimators=100, 
+                                  max_depth=8)
+model_rf.fit(xtrain, ytrain)
+ypredrf = model_rf.predict(xtest)
+test_acc = accuracy_score(ytest, ypredrf)
+accu_rfNC = round(test_acc*100,1) 
+
+cmrf = confusion_matrix(ytest, ypredrf,labels=model_rf.classes_)
+disprf = ConfusionMatrixDisplay(cmrf,display_labels=model_rf.classes_)
+disprf.plot()
+plt.title('Confusion matrix with Random Forests accuracy = '+str(accu_rfNC)+'%')
+plt.show()
+
+recall = recall_score(ytest, ypredrf, average='weighted')
+f1 = f1_score(ytest, ypredrf, average='weighted')
+
+#XGBOOST
+
+modelxgb_NC = XGBClassifier(objective='multi:softprob',learning_rate=0.5,
+                         max_depth=5,subsample=0.6,n_estimators=200,
+                         min_child_weight = 10, gamma = 1.5)
+modelxgb_NC.fit(xtrain,ytrain)
+
+ypredxgb_NC = modelxgb_NC.predict(xtest)
+test_acc_xgb_NC = accuracy_score(ytest, ypredxgb_NC)
+accu_xgb_NC = round(test_acc_xgb_NC*100,1)
+#67% de précision 
+cmxgb_NC = confusion_matrix(ytest, ypredxgb_NC,labels=modelxgb_NC.classes_)
+dispxgb_NC = ConfusionMatrixDisplay(cmxgb_NC,display_labels=modelxgb_NC.classes_)
+dispxgb_NC.plot()
+plt.title('Confusion matrix with XGBOOST accuracy = '+str(accu_xgb)+'%')
+plt.show()
+
+params = {
+        'min_child_weight': [1, 5, 10],
+        'gamma': [0.5, 1, 1.5, 2, 5],
+        'subsample': [0.6, 0.8, 1.0],
+        'max_depth': [3, 4, 5],
+        'learning_rate' : [0.1,0.3,0.5,0.7],
+        'n_estimators': [25,50,75,100,200]
+        }
+
+xgb = XGBClassifier( objective='multi:softprob',silent=True, nthread=1)
+
+folds = 5
+param_comb = 10
+
+skf = StratifiedKFold(n_splits=folds, shuffle = True, random_state =42)
+
+random_searchNC = RandomizedSearchCV(xgb, param_distributions=params, 
+                                   n_iter=param_comb,scoring='accuracy', n_jobs=-1,
+                                   cv=skf.split(xtrain,ytrain), verbose=3, random_state=42)
+
+random_searchNC.fit(xtrain,ytrain)
+print(random_searchNC.cv_results_)
+print(random_searchNC.best_estimator_)
+print(random_searchNC.best_params_)
+
+
